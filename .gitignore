@@ -21,7 +21,7 @@
 *.log
 *.pot
 *.pyc
-*.env
+saleor-venv/
 local_settings.py
 __pycache__/
 build/
