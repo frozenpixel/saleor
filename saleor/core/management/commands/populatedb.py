@@ -87,6 +87,8 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         self.make_database_faster()
         create_images = not options["withoutimages"]
+        superuser_email = os.environ.get("SUPERUSER_EMAIL", "admin@example.com")
+        superuser_password = os.environ.get("SUPERUSER_PASSWORD", "admin")
         for msg in create_shipping_zones():
             self.stdout.write(msg)
         create_warehouses()
@@ -111,7 +113,7 @@ class Command(BaseCommand):
             self.stdout.write(msg)
 
         if options["createsuperuser"]:
-            credentials = {"email": "admin@example.com", "password": "admin"}
+            credentials = {"email": superuser_email, "password": superuser_password}
             msg = create_superuser(credentials)
             self.stdout.write(msg)
             add_address_to_admin(credentials["email"])
