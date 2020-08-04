@@ -32,6 +32,8 @@ def get_bool_from_env(name, default_value):
 
 DEBUG = get_bool_from_env("DEBUG", True)
 
+DO_DB = get_bool_from_env("DO_DB", False)
+
 SITE_ID = 1
 
 PROJECT_ROOT = os.path.normpath(os.path.join(os.path.dirname(__file__), ".."))
@@ -65,6 +67,12 @@ DATABASES = {
         default="postgres://saleor:saleor@localhost:5432/saleor", conn_max_age=600
     )
 }
+
+# Allow SSL connections to DigitalOcean's managed database.
+if DO_DB:
+    DATABASES['default']['OPTIONS'] = {
+        'sslmode':'verify-full',
+        'sslrootcert': os.path.join(PROJECT_ROOT, 'ca-certificate.crt')
 
 
 TIME_ZONE = "America/Chicago"
