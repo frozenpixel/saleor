@@ -21,6 +21,7 @@
 *.log
 *.pot
 *.pyc
+*.crt
 saleor-venv/
 local_settings.py
 __pycache__/
