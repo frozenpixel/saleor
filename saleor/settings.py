@@ -73,6 +73,7 @@ if DO_DB:
     DATABASES['default']['OPTIONS'] = {
         'sslmode':'verify-full',
         'sslrootcert': os.path.join(PROJECT_ROOT, 'ca-certificate.crt')
+}
 
 
 TIME_ZONE = "America/Chicago"
