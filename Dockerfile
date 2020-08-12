@@ -42,9 +42,13 @@ ARG STATIC_URL
 ENV STATIC_URL ${STATIC_URL:-/static/}
 RUN SECRET_KEY=dummy STATIC_URL=${STATIC_URL} python3 manage.py collectstatic --no-input
 
-EXPOSE 8000
-ENV PORT 8000
+ENV PORT 443
 ENV PYTHONUNBUFFERED 1
 ENV PROCESSES 4
+
+FROM nginx:stable
+WORKDIR /app
+COPY ./nginx/default.conf /etc/nginx/conf.d/default.conf
+COPY --from=builder /app/build/ /app/
 
 CMD ["uwsgi", "--ini", "/app/saleor/wsgi/uwsgi.ini"]
