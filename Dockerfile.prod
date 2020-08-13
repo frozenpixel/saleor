@@ -38,20 +38,17 @@ COPY --from=build-python /usr/local/bin/ /usr/local/bin/
 COPY . /app
 WORKDIR /app
 
-RUN mkdir -p  /app/uwsgi \
-  && chown -R www-data:www-data /app/uwsgi/
-  
 ARG STATIC_URL
 ENV STATIC_URL ${STATIC_URL:-/static/}
 RUN SECRET_KEY=dummy STATIC_URL=${STATIC_URL} python3 manage.py collectstatic --no-input
 
+EXPOSE 80
+ENV PORT 80
+ENV PYTHONUNBUFFERED 1
+ENV PROCESSES 4
+
 FROM nginx:stable
 WORKDIR /app
 COPY ./nginx/default.conf /etc/nginx/conf.d/default.conf
-
-EXPOSE 8000
-ENV PORT 8000
-ENV PYTHONUNBUFFERED 1
-ENV PROCESSES 4
 
 CMD ["uwsgi", "--ini", "/app/saleor/wsgi/uwsgi.ini"]
