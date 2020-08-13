@@ -17,7 +17,7 @@ urlpatterns = [
         digital_product,
         name="digital-product",
     ),
-]
+] + static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
 
 if settings.DEBUG:
     import warnings
