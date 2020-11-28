@@ -17,6 +17,7 @@ from .. import (
     META_DESCRIPTION_KEY,
     AvataxConfiguration,
     TransactionType,
+    _validate_adddress_details,
     api_get_request,
     api_post_request,
     generate_request_data_from_checkout,
@@ -89,10 +90,14 @@ def test_calculate_checkout_line_total(
     site_settings.save()
     line = checkout_with_item.lines.first()
     product = line.variant.product
-    manager.assign_tax_code_to_object_meta(product, "PC040156")
+    product.metadata = {}
+    manager.assign_tax_code_to_object_meta(product.product_type, "PC040156")
     product.save()
-    discounts = [discount_info] if with_discount else None
-    total = manager.calculate_checkout_line_total(line, discounts)
+    product.product_type.save()
+    discounts = [discount_info] if with_discount else []
+    total = manager.calculate_checkout_line_total(
+        line, discounts, checkout_with_item.channel
+    )
     total = quantize_price(total, total.currency)
     assert total == TaxedMoney(
         net=Money(expected_net, "USD"), gross=Money(expected_gross, "USD")
@@ -144,9 +149,10 @@ def test_calculate_checkout_total_uses_default_calculation(
     checkout_with_item.save()
     line = checkout_with_item.lines.first()
     product = line.variant.product
-    manager.assign_tax_code_to_object_meta(product, "PC040156")
+    product.metadata = {}
+    manager.assign_tax_code_to_object_meta(product.product_type, "PC040156")
     product.save()
-
+    product.product_type.save()
     product_with_single_variant.charge_taxes = False
     product_with_single_variant.category = non_default_category
     product_with_single_variant.save()
@@ -212,9 +218,10 @@ def test_calculate_checkout_total(
     checkout_with_item.save()
     line = checkout_with_item.lines.first()
     product = line.variant.product
-    manager.assign_tax_code_to_object_meta(product, "PC040156")
+    product.metadata = {}
+    manager.assign_tax_code_to_object_meta(product.product_type, "PC040156")
     product.save()
-
+    product.product_type.save()
     product_with_single_variant.charge_taxes = False
     product_with_single_variant.category = non_default_category
     product_with_single_variant.save()
@@ -436,9 +443,12 @@ def test_get_cached_tax_codes_or_fetch_wrong_response(monkeypatch):
     assert len(tax_codes) == 0
 
 
-def test_taxes_need_new_fetch(monkeypatch, checkout_with_item, address):
+def test_checkout_needs_new_fetch(
+    monkeypatch, checkout_with_item, address, shipping_method
+):
     monkeypatch.setattr("saleor.plugins.avatax.cache.get", lambda x: None)
     checkout_with_item.shipping_address = address
+    checkout_with_item.shipping_method = shipping_method
     config = AvataxConfiguration(
         username_or_account="wrong_data", password_or_license="wrong_data"
     )
@@ -841,3 +851,35 @@ def test_get_order_tax_data_raised_error(
 
     # then
     assert e._excinfo[1].args[0] == return_value["error"]
+
+
+@pytest.mark.parametrize(
+    "shipping_address_none, shipping_method_none, billing_address_none, "
+    "is_shipping_required, expected_is_valid",
+    [
+        (False, False, False, True, True),
+        (True, True, False, True, False),
+        (True, True, False, False, True),
+        (False, True, False, True, False),
+        (True, False, False, True, False),
+    ],
+)
+def test_validate_adddress_details(
+    shipping_address_none,
+    shipping_method_none,
+    billing_address_none,
+    is_shipping_required,
+    expected_is_valid,
+    checkout_ready_to_complete,
+):
+    shipping_address = checkout_ready_to_complete.shipping_address
+    shipping_address = None if shipping_address_none else shipping_address
+    billing_address = checkout_ready_to_complete.billing_address
+    billing_address = None if billing_address_none else billing_address
+    address = shipping_address or billing_address
+    shipping_method = checkout_ready_to_complete.shipping_method
+    shipping_method = None if shipping_method_none else shipping_method
+    is_valid = _validate_adddress_details(
+        shipping_address, is_shipping_required, address, shipping_method
+    )
+    assert is_valid is expected_is_valid

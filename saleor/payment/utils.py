@@ -4,7 +4,6 @@ from decimal import Decimal
 from typing import Dict, Optional
 
 import graphene
-from django.conf import settings
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db import transaction
 
@@ -181,6 +180,7 @@ def create_transaction(
         customer_id=gateway_response.customer_id,
         gateway_response=gateway_response.raw_response or {},
         action_required_data=gateway_response.action_required_data or {},
+        searchable_key=gateway_response.searchable_key or "",
     )
     return txn
 
@@ -234,9 +234,6 @@ def validate_gateway_response(response: GatewayResponse):
                 sorted(ALLOWED_GATEWAY_KINDS)
             )
         )
-
-    if response.currency != settings.DEFAULT_CURRENCY:
-        logger.warning("Transaction currency is different than Saleor's.")
 
     try:
         json.dumps(response.raw_response, cls=DjangoJSONEncoder)

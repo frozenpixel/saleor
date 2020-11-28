@@ -10,6 +10,7 @@ from prices import Money, MoneyRange, TaxedMoney, TaxedMoneyRange
 from ..payment.interface import (
     CustomerSource,
     GatewayResponse,
+    InitializedPaymentResponse,
     PaymentData,
     PaymentGateway,
 )
@@ -17,13 +18,14 @@ from .models import PluginConfiguration
 
 if TYPE_CHECKING:
     # flake8: noqa
-    from ..core.taxes import TaxType
-    from ..checkout.models import Checkout, CheckoutLine
-    from ..discount import DiscountInfo
-    from ..product.models import Product, ProductType
     from ..account.models import Address, User
-    from ..order.models import Fulfillment, OrderLine, Order
+    from ..channel.models import Channel
+    from ..checkout.models import Checkout, CheckoutLine
+    from ..core.taxes import TaxType
+    from ..discount import DiscountInfo
     from ..invoice.models import Invoice
+    from ..order.models import Fulfillment, Order, OrderLine
+    from ..product.models import Product, ProductType
 
 
 PluginConfigurationType = List[dict]
@@ -33,12 +35,14 @@ class ConfigurationTypeField:
     STRING = "String"
     BOOLEAN = "Boolean"
     SECRET = "Secret"
+    SECRET_MULTILINE = "SecretMultiline"
     PASSWORD = "Password"
     CHOICES = [
         (STRING, "Field is a String"),
         (BOOLEAN, "Field is a Boolean"),
         (SECRET, "Field is a Secret"),
         (PASSWORD, "Field is a Password"),
+        (SECRET_MULTILINE, "Field is a Secret multiline"),
     ]
 
 
@@ -132,10 +136,12 @@ class BasePlugin:
         """
         return NotImplemented
 
+    # TODO: Add information about this change to `breaking changes in changelog`
     def calculate_checkout_line_total(
         self,
         checkout_line: "CheckoutLine",
         discounts: List["DiscountInfo"],
+        channel: "Channel",
         previous_value: TaxedMoney,
     ) -> TaxedMoney:
         """Calculate checkout line total.
@@ -253,7 +259,10 @@ class BasePlugin:
         return NotImplemented
 
     def assign_tax_code_to_object_meta(
-        self, obj: Union["Product", "ProductType"], tax_code: str, previous_value: Any
+        self,
+        obj: Union["Product", "ProductType"],
+        tax_code: Optional[str],
+        previous_value: Any,
     ):
         """Assign tax code dedicated to plugin."""
         return NotImplemented
@@ -363,6 +372,11 @@ class BasePlugin:
 
     def fetch_taxes_data(self, previous_value: Any) -> Any:
         """Triggered when ShopFetchTaxRates mutation is called."""
+        return NotImplemented
+
+    def initialize_payment(
+        self, payment_data: dict, previous_value
+    ) -> "InitializedPaymentResponse":
         return NotImplemented
 
     def authorize_payment(
@@ -512,21 +526,28 @@ class BasePlugin:
 
     @classmethod
     def _update_configuration_structure(cls, configuration: PluginConfigurationType):
+        updated_configuration = []
         config_structure = getattr(cls, "CONFIG_STRUCTURE") or {}
         desired_config_keys = set(config_structure.keys())
+        for config_field in configuration:
+            if config_field["name"] not in desired_config_keys:
+                continue
+            updated_configuration.append(config_field)
 
-        configured_keys = set(d["name"] for d in configuration)
+        configured_keys = set(d["name"] for d in updated_configuration)
         missing_keys = desired_config_keys - configured_keys
 
         if not missing_keys:
-            return
+            return updated_configuration
 
         default_config = cls.DEFAULT_CONFIGURATION
         if not default_config:
-            return
+            return updated_configuration
 
         update_values = [copy(k) for k in default_config if k["name"] in missing_keys]
-        configuration.extend(update_values)
+        if update_values:
+            updated_configuration.extend(update_values)
+        return updated_configuration
 
     @classmethod
     def get_default_active(cls):
@@ -537,7 +558,7 @@ class BasePlugin:
     ) -> PluginConfigurationType:
         if not configuration:
             configuration = []
-        self._update_configuration_structure(configuration)
+        configuration = self._update_configuration_structure(configuration)
         if configuration:
             # Let's add a translated descriptions and labels
             self._append_config_structure(configuration)

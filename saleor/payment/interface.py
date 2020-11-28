@@ -40,6 +40,7 @@ class GatewayResponse:
     # Some gateway can process transaction asynchronously. This value define if we
     # should create new transaction based on this response
     transaction_already_processed: bool = False
+    searchable_key: Optional[str] = None
 
 
 @dataclass
@@ -122,3 +123,10 @@ class PaymentGateway:
     name: str
     currencies: List[str]
     config: List[Dict[str, Any]]
+
+
+@dataclass
+class InitializedPaymentResponse:
+    gateway: str
+    name: str
+    data: Optional[JSONType] = None
