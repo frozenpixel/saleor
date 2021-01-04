@@ -489,6 +489,7 @@ input AttributeInput {
 enum AttributeInputTypeEnum {
   DROPDOWN
   MULTISELECT
+  FILE
 }
 
 type AttributeReorderValues {
@@ -565,6 +566,7 @@ type AttributeValue implements Node {
   type: AttributeValueType @deprecated(reason: "Use the `inputType` field to determine the type of attribute's value. This field will be removed after 2020-07-31.")
   translation(languageCode: LanguageCodeEnum!): AttributeValueTranslation
   inputType: AttributeInputTypeEnum
+  file: File
 }
 
 type AttributeValueBulkDelete {
@@ -593,7 +595,9 @@ type AttributeValueDelete {
 
 input AttributeValueInput {
   id: ID
-  values: [String]!
+  values: [String]
+  file: String
+  contentType: String
 }
 
 type AttributeValueTranslatableContent implements Node {
@@ -629,33 +633,9 @@ type AttributeValueUpdate {
   attributeValue: AttributeValue
 }
 
-type AuthorizationKey {
-  name: AuthorizationKeyType!
-  key: String!
-}
-
-type AuthorizationKeyAdd {
-  errors: [Error!]! @deprecated(reason: "Use typed errors with error codes. This field will be removed after 2020-07-31.")
-  authorizationKey: AuthorizationKey
-  shop: Shop
-  shopErrors: [ShopError!]!
-}
-
-type AuthorizationKeyDelete {
-  errors: [Error!]! @deprecated(reason: "Use typed errors with error codes. This field will be removed after 2020-07-31.")
-  authorizationKey: AuthorizationKey
-  shop: Shop
-  shopErrors: [ShopError!]!
-}
-
-input AuthorizationKeyInput {
-  key: String!
-  password: String!
-}
-
-enum AuthorizationKeyType {
-  FACEBOOK
-  GOOGLE_OAUTH2
+input BulkAttributeValueInput {
+  id: ID
+  values: [String]!
 }
 
 type BulkProductError {
@@ -1961,6 +1941,11 @@ enum ExportScope {
   FILTER
 }
 
+type File {
+  url: String!
+  contentType: String
+}
+
 enum FileTypesEnum {
   CSV
   XLSX
@@ -1968,7 +1953,7 @@ enum FileTypesEnum {
 
 type FileUpload {
   errors: [Error!]! @deprecated(reason: "Use typed errors with error codes. This field will be removed after 2020-07-31.")
-  uploadedFile: UploadedFile
+  uploadedFile: File
   uploadErrors: [UploadError!]!
 }
 
@@ -2310,10 +2295,12 @@ type Margin {
   stop: Int
 }
 
-type Menu implements Node {
+type Menu implements Node & ObjectWithMetadata {
   id: ID!
   name: String!
   slug: String!
+  privateMetadata: [MetadataItem]!
+  metadata: [MetadataItem]!
   items: [MenuItem]
 }
 
@@ -2380,7 +2367,7 @@ input MenuInput {
   slug: String
 }
 
-type MenuItem implements Node {
+type MenuItem implements Node & ObjectWithMetadata {
   id: ID!
   name: String!
   menu: Menu!
@@ -2389,6 +2376,8 @@ type MenuItem implements Node {
   collection: Collection
   page: Page
   level: Int!
+  privateMetadata: [MetadataItem]!
+  metadata: [MetadataItem]!
   children: [MenuItem]
   url: String
   translation(languageCode: LanguageCodeEnum!): MenuItemTranslation
@@ -2555,8 +2544,6 @@ type Mutation {
   deleteWarehouse(id: ID!): WarehouseDelete
   assignWarehouseShippingZone(id: ID!, shippingZoneIds: [ID!]!): WarehouseShippingZoneAssign
   unassignWarehouseShippingZone(id: ID!, shippingZoneIds: [ID!]!): WarehouseShippingZoneUnassign
-  authorizationKeyAdd(input: AuthorizationKeyInput!, keyType: AuthorizationKeyType!): AuthorizationKeyAdd
-  authorizationKeyDelete(keyType: AuthorizationKeyType!): AuthorizationKeyDelete
   staffNotificationRecipientCreate(input: StaffNotificationRecipientInput!): StaffNotificationRecipientCreate
   staffNotificationRecipientUpdate(id: ID!, input: StaffNotificationRecipientInput!): StaffNotificationRecipientUpdate
   staffNotificationRecipientDelete(id: ID!): StaffNotificationRecipientDelete
@@ -2926,6 +2913,7 @@ input OrderDraftFilterInput {
   customer: String
   created: DateRangeInput
   search: String
+  channels: [ID]
 }
 
 type OrderError {
@@ -3059,6 +3047,7 @@ input OrderFilterInput {
   customer: String
   created: DateRangeInput
   search: String
+  channels: [ID]
 }
 
 type OrderFulfill {
@@ -4087,7 +4076,7 @@ type ProductType implements Node & ObjectWithMetadata {
   products(channel: String, before: String, after: String, first: Int, last: Int): ProductCountableConnection @deprecated(reason: "Use the top-level `products` query with the `productTypes` filter.")
   taxRate: TaxRateType
   taxType: TaxType
-  variantAttributes: [Attribute]
+  variantAttributes(variantSelection: VariantAttributeScope): [Attribute]
   productAttributes: [Attribute]
   availableAttributes(filter: AttributeFilterInput, before: String, after: String, first: Int, last: Int): AttributeCountableConnection
 }
@@ -4188,13 +4177,9 @@ type ProductVariant implements Node & ObjectWithMetadata {
   weight: Weight
   privateMetadata: [MetadataItem]!
   metadata: [MetadataItem]!
-  quantity: Int! @deprecated(reason: "Use the stock field instead. This field will be removed after 2020-07-31.")
-  quantityAllocated: Int @deprecated(reason: "Use the stock field instead. This field will be removed after 2020-07-31.")
-  stockQuantity: Int! @deprecated(reason: "Use the quantityAvailable field instead. This field will be removed after 2020-07-31.")
   channelListings: [ProductVariantChannelListing!]
   pricing: VariantPricingInfo
-  isAvailable: Boolean @deprecated(reason: "Use the stock field instead. This field will be removed after 2020-07-31.")
-  attributes: [SelectedAttribute!]!
+  attributes(variantSelection: VariantAttributeScope): [SelectedAttribute!]!
   costPrice: Money
   margin: Int
   quantityOrdered: Int
@@ -4214,7 +4199,7 @@ type ProductVariantBulkCreate {
 }
 
 input ProductVariantBulkCreateInput {
-  attributes: [AttributeValueInput]!
+  attributes: [BulkAttributeValueInput]!
   sku: String!
   trackInventory: Boolean
   weight: WeightScalar
@@ -4414,7 +4399,7 @@ type Query {
   channel(id: ID): Channel
   channels: [Channel!]
   attributes(filter: AttributeFilterInput, sortBy: AttributeSortingInput, before: String, after: String, first: Int, last: Int): AttributeCountableConnection
-  attribute(id: ID!): Attribute
+  attribute(id: ID, slug: String): Attribute
   appsInstallations: [AppInstallation!]!
   apps(filter: AppFilterInput, sortBy: AppSortingInput, before: String, after: String, first: Int, last: Int): AppCountableConnection
   app(id: ID!): App
@@ -4859,7 +4844,6 @@ type Shop {
   availablePaymentGateways(currency: String): [PaymentGateway!]!
   availableShippingMethods(channel: String!, address: AddressInput): [ShippingMethod]
   geolocalization: Geolocalization
-  authorizationKeys: [AuthorizationKey]!
   countries(languageCode: LanguageCodeEnum): [CountryDisplay!]!
   defaultCountry: CountryDisplay
   defaultMailSenderName: String
@@ -5268,11 +5252,6 @@ enum UploadErrorCode {
   GRAPHQL_ERROR
 }
 
-type UploadedFile {
-  url: String!
-  contentType: String!
-}
-
 type User implements Node & ObjectWithMetadata {
   id: ID!
   lastLogin: DateTime
@@ -5363,6 +5342,12 @@ type VAT {
   countryCode: String!
   standardRate: Float
   reducedRates: [ReducedRate]!
+}
+
+enum VariantAttributeScope {
+  ALL
+  VARIANT_SELECTION
+  NOT_VARIANT_SELECTION
 }
 
 type VariantImageAssign {

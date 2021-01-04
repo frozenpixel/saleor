@@ -3189,14 +3189,15 @@ def test_order_void(
     assert event_payment_voided.user == staff_user
 
 
+@patch.object(PluginsManager, "void_payment")
 def test_order_void_payment_error(
-    mock_get_manager, staff_api_client, permission_manage_orders, payment_txn_preauth
+    mock_void_payment, staff_api_client, permission_manage_orders, payment_txn_preauth
 ):
     msg = "Oops! Something went wrong."
     order = payment_txn_preauth.order
     order_id = graphene.Node.to_global_id("Order", order.id)
     variables = {"id": order_id}
-    mock_get_manager.void_payment.side_effect = ValueError(msg)
+    mock_void_payment.side_effect = ValueError(msg)
     response = staff_api_client.post_graphql(
         ORDER_VOID, variables, permissions=[permission_manage_orders]
     )
@@ -3207,6 +3208,8 @@ def test_order_void_payment_error(
 
     order_errors = content["data"]["orderVoid"]["orderErrors"]
     assert order_errors[0]["code"] == OrderErrorCode.PAYMENT_ERROR.name
+
+    mock_void_payment.assert_called_once()
 
 
 def test_order_refund(staff_api_client, permission_manage_orders, payment_txn_captured):
@@ -4091,6 +4094,94 @@ def test_order_bulk_cancel_as_app(
     assert mock_cancel_order.call_count == expected_count
 
 
+def test_order_query_with_filter_channels_with_one_channel(
+    orders_query_with_filter,
+    staff_api_client,
+    permission_manage_orders,
+    orders,
+    channel_USD,
+):
+    # given
+    channel_id = graphene.Node.to_global_id("Channel", channel_USD.pk)
+    variables = {"filter": {"channels": [channel_id]}}
+
+    # when
+    response = staff_api_client.post_graphql(
+        orders_query_with_filter, variables, permissions=(permission_manage_orders,)
+    )
+
+    # then
+    content = get_graphql_content(response)
+    orders = content["data"]["orders"]["edges"]
+    assert len(orders) == 3
+
+
+def test_order_query_with_filter_channels_without_channel(
+    orders_query_with_filter, staff_api_client, permission_manage_orders, orders,
+):
+    # given
+    variables = {"filter": {"channels": []}}
+
+    # when
+    response = staff_api_client.post_graphql(
+        orders_query_with_filter, variables, permissions=(permission_manage_orders,)
+    )
+
+    # then
+    content = get_graphql_content(response)
+    orders = content["data"]["orders"]["edges"]
+    assert len(orders) == 5
+
+
+def test_order_query_with_filter_channels_with_many_channel(
+    orders_query_with_filter,
+    staff_api_client,
+    permission_manage_orders,
+    orders,
+    channel_USD,
+    channel_PLN,
+    other_channel_USD,
+):
+    # given
+    Order.objects.create(channel=other_channel_USD)
+    channel_usd_id = graphene.Node.to_global_id("Channel", channel_USD.pk)
+    channel_pln_id = graphene.Node.to_global_id("Channel", channel_PLN.pk)
+    variables = {"filter": {"channels": [channel_pln_id, channel_usd_id]}}
+
+    # when
+    response = staff_api_client.post_graphql(
+        orders_query_with_filter, variables, permissions=(permission_manage_orders,)
+    )
+
+    # then
+    content = get_graphql_content(response)
+    orders = content["data"]["orders"]["edges"]
+    assert len(orders) == 5
+    assert Order.objects.non_draft().count() == 6
+
+
+def test_order_query_with_filter_channels_with_empty_channel(
+    orders_query_with_filter,
+    staff_api_client,
+    permission_manage_orders,
+    orders,
+    other_channel_USD,
+):
+    # given
+    channel_id = graphene.Node.to_global_id("Channel", other_channel_USD.pk)
+    variables = {"filter": {"channels": [channel_id]}}
+
+    # when
+    response = staff_api_client.post_graphql(
+        orders_query_with_filter, variables, permissions=(permission_manage_orders,)
+    )
+
+    # then
+    content = get_graphql_content(response)
+    orders = content["data"]["orders"]["edges"]
+    assert len(orders) == 0
+
+
 @pytest.mark.parametrize(
     "orders_filter, count",
     [
@@ -4664,3 +4755,218 @@ def test_draft_orders_query_with_filter_search_by_id(
     response = staff_api_client.post_graphql(draft_orders_query_with_filter, variables)
     content = get_graphql_content(response)
     assert content["data"]["draftOrders"]["totalCount"] == 1
+
+
+QUERY_GET_VARIANTS_FROM_ORDER = """
+{
+  me{
+    orders(first:10){
+      edges{
+        node{
+          lines{
+            variant{
+              id
+            }
+          }
+        }
+      }
+    }
+  }
+}
+"""
+
+
+def test_get_variant_from_order_line_variant_published_as_customer(
+    user_api_client, order_line
+):
+    # given
+
+    # when
+    response = user_api_client.post_graphql(QUERY_GET_VARIANTS_FROM_ORDER, {})
+
+    # then
+    content = get_graphql_content(response)
+    orders = content["data"]["me"]["orders"]["edges"]
+    assert orders[0]["node"]["lines"][0]["variant"]["id"]
+
+
+def test_get_variant_from_order_line_variant_published_as_admin(
+    staff_api_client, order_line, permission_manage_products
+):
+    # given
+    order = order_line.order
+    order.user = staff_api_client.user
+    order.save()
+
+    # when
+    response = staff_api_client.post_graphql(
+        QUERY_GET_VARIANTS_FROM_ORDER,
+        {},
+        permissions=(permission_manage_products,),
+        check_no_permissions=False,
+    )
+
+    # then
+    content = get_graphql_content(response)
+    orders = content["data"]["me"]["orders"]["edges"]
+    assert orders[0]["node"]["lines"][0]["variant"]["id"]
+
+
+def test_get_variant_from_order_line_variant_not_published_as_customer(
+    user_api_client, order_line
+):
+    # given
+    product = order_line.variant.product
+    product.channel_listings.update(is_published=False)
+
+    # when
+    response = user_api_client.post_graphql(QUERY_GET_VARIANTS_FROM_ORDER, {})
+
+    # then
+    content = get_graphql_content(response)
+    orders = content["data"]["me"]["orders"]["edges"]
+    assert orders[0]["node"]["lines"][0]["variant"] is None
+
+
+def test_get_variant_from_order_line_variant_not_published_as_admin(
+    staff_api_client, order_line, permission_manage_products
+):
+    # given
+    order = order_line.order
+    order.user = staff_api_client.user
+    order.save()
+    product = order_line.variant.product
+    product.channel_listings.update(is_published=False)
+
+    # when
+    response = staff_api_client.post_graphql(
+        QUERY_GET_VARIANTS_FROM_ORDER,
+        {},
+        permissions=(permission_manage_products,),
+        check_no_permissions=False,
+    )
+
+    # then
+    content = get_graphql_content(response)
+    orders = content["data"]["me"]["orders"]["edges"]
+    assert orders[0]["node"]["lines"][0]["variant"]["id"]
+
+
+def test_get_variant_from_order_line_variant_not_assigned_to_channel_as_customer(
+    user_api_client, order_line
+):
+    # given
+    product = order_line.variant.product
+    product.channel_listings.all().delete()
+
+    # when
+    response = user_api_client.post_graphql(QUERY_GET_VARIANTS_FROM_ORDER, {})
+
+    # then
+    content = get_graphql_content(response)
+    orders = content["data"]["me"]["orders"]["edges"]
+    assert orders[0]["node"]["lines"][0]["variant"] is None
+
+
+def test_get_variant_from_order_line_variant_not_assigned_to_channel_as_admin(
+    staff_api_client, order_line, permission_manage_products
+):
+    # given
+    order = order_line.order
+    order.user = staff_api_client.user
+    order.save()
+    product = order_line.variant.product
+    product.channel_listings.all().delete()
+
+    # when
+    response = staff_api_client.post_graphql(
+        QUERY_GET_VARIANTS_FROM_ORDER,
+        {},
+        permissions=(permission_manage_products,),
+        check_no_permissions=False,
+    )
+
+    # then
+    content = get_graphql_content(response)
+    orders = content["data"]["me"]["orders"]["edges"]
+    assert orders[0]["node"]["lines"][0]["variant"]["id"]
+
+
+def test_get_variant_from_order_line_variant_not_visible_in_listings_as_customer(
+    user_api_client, order_line
+):
+    # given
+    product = order_line.variant.product
+    product.channel_listings.update(visible_in_listings=False)
+
+    # when
+    response = user_api_client.post_graphql(QUERY_GET_VARIANTS_FROM_ORDER, {})
+
+    # then
+    content = get_graphql_content(response)
+    orders = content["data"]["me"]["orders"]["edges"]
+    assert orders[0]["node"]["lines"][0]["variant"]["id"]
+
+
+def test_get_variant_from_order_line_variant_not_visible_in_listings_as_admin(
+    staff_api_client, order_line, permission_manage_products
+):
+    # given
+    order = order_line.order
+    order.user = staff_api_client.user
+    order.save()
+    product = order_line.variant.product
+    product.channel_listings.update(visible_in_listings=False)
+
+    # when
+    response = staff_api_client.post_graphql(
+        QUERY_GET_VARIANTS_FROM_ORDER,
+        {},
+        permissions=(permission_manage_products,),
+        check_no_permissions=False,
+    )
+
+    # then
+    content = get_graphql_content(response)
+    orders = content["data"]["me"]["orders"]["edges"]
+    assert orders[0]["node"]["lines"][0]["variant"]["id"]
+
+
+def test_get_variant_from_order_line_variant_not_exists_as_customer(
+    user_api_client, order_line
+):
+    # given
+    order_line.variant = None
+    order_line.save()
+
+    # when
+    response = user_api_client.post_graphql(QUERY_GET_VARIANTS_FROM_ORDER, {})
+
+    # then
+    content = get_graphql_content(response)
+    orders = content["data"]["me"]["orders"]["edges"]
+    assert orders[0]["node"]["lines"][0]["variant"] is None
+
+
+def test_get_variant_from_order_line_variant_not_exists_as_staff(
+    staff_api_client, order_line, permission_manage_products
+):
+    # given
+    order = order_line.order
+    order.user = staff_api_client.user
+    order.save()
+    order_line.variant = None
+    order_line.save()
+
+    # when
+    response = staff_api_client.post_graphql(
+        QUERY_GET_VARIANTS_FROM_ORDER,
+        {},
+        permissions=(permission_manage_products,),
+        check_no_permissions=False,
+    )
+
+    # then
+    content = get_graphql_content(response)
+    orders = content["data"]["me"]["orders"]["edges"]
+    assert orders[0]["node"]["lines"][0]["variant"] is None

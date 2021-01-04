@@ -37,17 +37,21 @@ def _applicable_weight_based_methods(weight, qs):
     return qs.filter(min_weight_matched & (no_weight_limit | max_weight_matched))
 
 
-def _applicable_price_based_methods(price: Money, qs):
+def _applicable_price_based_methods(price: Money, qs, channel_id):
     """Return price based shipping methods that are applicable for the given total."""
     qs_shipping_method = qs.price_based()
 
     price_based = Q(shipping_method_id__in=qs_shipping_method)
+    channel_filter = Q(channel_id=channel_id)
     min_price_matched = Q(minimum_order_price_amount__lte=price.amount)
     no_price_limit = Q(maximum_order_price_amount__isnull=True)
     max_price_matched = Q(maximum_order_price_amount__gte=price.amount)
 
     applicable_price_based_methods = ShippingMethodChannelListing.objects.filter(
-        price_based & min_price_matched & (no_price_limit | max_price_matched)
+        channel_filter
+        & price_based
+        & min_price_matched
+        & (no_price_limit | max_price_matched)
     ).values_list("shipping_method__id", flat=True)
     return qs_shipping_method.filter(id__in=applicable_price_based_methods)
 
@@ -126,7 +130,7 @@ class ShippingMethodQueryset(models.QuerySet):
         if product_ids:
             qs = self.exclude_shipping_methods_for_excluded_products(qs, product_ids)
 
-        price_based_methods = _applicable_price_based_methods(price, qs)
+        price_based_methods = _applicable_price_based_methods(price, qs, channel_id)
         weight_based_methods = _applicable_weight_based_methods(weight, qs)
         shipping_methods = price_based_methods | weight_based_methods
 
@@ -138,18 +142,23 @@ class ShippingMethodQueryset(models.QuerySet):
         channel_id,
         price: Money,
         country_code=None,
+        lines=None,
     ):
-        if not instance.is_shipping_required():
-            return None
         if not instance.shipping_address:
             return None
-        lines = instance.lines.prefetch_related("variant__product").all()
-        instance_product_ids = set(lines.values_list("variant__product", flat=True))
-
+        if not country_code:
+            # TODO: country_code should come from argument
+            country_code = instance.shipping_address.country.code  # type: ignore
+        if lines is None:
+            # TODO: lines should comes from args in get_valid_shipping_methods_for_order
+            lines = instance.lines.prefetch_related("variant__product").all()
+            instance_product_ids = set(lines.values_list("variant__product", flat=True))
+        else:
+            instance_product_ids = {line.product.id for line in lines}
         applicable_methods = self.applicable_shipping_methods(
             price=price,
             channel_id=channel_id,
-            weight=instance.get_total_weight(),
+            weight=instance.get_total_weight(lines),
             country_code=country_code or instance.shipping_address.country.code,
             product_ids=instance_product_ids,
         ).prefetch_related("zip_code_rules")
