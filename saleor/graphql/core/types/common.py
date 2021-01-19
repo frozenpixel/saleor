@@ -160,10 +160,12 @@ class MetadataError(Error):
 class OrderError(Error):
     code = OrderErrorCode(description="The error code.", required=True)
     warehouse = graphene.ID(
-        description="Warehouse ID which causes the error.", required=False,
+        description="Warehouse ID which causes the error.",
+        required=False,
     )
     order_line = graphene.ID(
-        description="Order line ID which causes the error.", required=False,
+        description="Order line ID which causes the error.",
+        required=False,
     )
     variants = graphene.List(
         graphene.NonNull(graphene.ID),
@@ -195,6 +197,11 @@ class ProductError(Error):
     attributes = graphene.List(
         graphene.NonNull(graphene.ID),
         description="List of attributes IDs which causes the error.",
+        required=False,
+    )
+    values = graphene.List(
+        graphene.NonNull(graphene.ID),
+        description="List of attribute values IDs which causes the error.",
         required=False,
     )
 
@@ -258,6 +265,11 @@ class PageError(Error):
     attributes = graphene.List(
         graphene.NonNull(graphene.ID),
         description="List of attributes IDs which causes the error.",
+        required=False,
+    )
+    values = graphene.List(
+        graphene.NonNull(graphene.ID),
+        description="List of attribute values IDs which causes the error.",
         required=False,
     )
 

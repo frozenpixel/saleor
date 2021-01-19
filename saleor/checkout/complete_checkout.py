@@ -285,6 +285,9 @@ def _prepare_order_data(
     shipping_total = manager.calculate_checkout_shipping(
         checkout, lines, address, discounts
     )
+    shipping_tax_rate = manager.get_checkout_shipping_tax_rate(
+        checkout, lines, address, discounts, shipping_total
+    )
     order_data.update(
         _process_shipping_data_for_order(checkout, shipping_total, manager, lines)
     )
@@ -294,6 +297,7 @@ def _prepare_order_data(
             "language_code": get_language(),
             "tracking_client_id": checkout.tracking_code or "",
             "total": taxed_total,
+            "shipping_tax_rate": shipping_tax_rate,
         }
     )
 
@@ -456,7 +460,10 @@ def _get_order_data(
     """Prepare data that will be converted to order and its lines."""
     try:
         order_data = _prepare_order_data(
-            manager=manager, checkout=checkout, lines=lines, discounts=discounts,
+            manager=manager,
+            checkout=checkout,
+            lines=lines,
+            discounts=discounts,
         )
     except InsufficientStock as e:
         raise ValidationError(f"Insufficient product stock: {e.item}", code=e.code)
@@ -553,7 +560,9 @@ def complete_checkout(
     if not action_required:
         try:
             order = _create_order(
-                checkout=checkout, order_data=order_data, user=user,  # type: ignore
+                checkout=checkout,
+                order_data=order_data,
+                user=user,  # type: ignore
             )
             # remove checkout after order is successfully created
             checkout.delete()

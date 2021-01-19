@@ -19,10 +19,9 @@ from .models import PluginConfiguration
 if TYPE_CHECKING:
     # flake8: noqa
     from ..account.models import Address, User
-    from ..core.taxes import TaxType
+    from ..channel.models import Channel
     from ..checkout import CheckoutLineInfo
     from ..checkout.models import Checkout, CheckoutLine
-    from ..channel.models import Channel
     from ..core.taxes import TaxType
     from ..discount import DiscountInfo
     from ..invoice.models import Invoice
@@ -184,6 +183,38 @@ class BasePlugin:
         Overwrite this method if you need to apply specific logic for the calculation
         of an order line unit price.
         """
+        return NotImplemented
+
+    def get_checkout_line_tax_rate(
+        self,
+        checkout: "Checkout",
+        checkout_line_info: "CheckoutLineInfo",
+        address: Optional["Address"],
+        discounts: Iterable["DiscountInfo"],
+        previous_value: Decimal,
+    ) -> Decimal:
+        return NotImplemented
+
+    def get_order_line_tax_rate(
+        self,
+        order: "Order",
+        product: "Product",
+        address: Optional["Address"],
+        previous_value: Decimal,
+    ) -> Decimal:
+        return NotImplemented
+
+    def get_checkout_shipping_tax_rate(
+        self,
+        checkout: "Checkout",
+        lines: Iterable["CheckoutLineInfo"],
+        address: Optional["Address"],
+        discounts: Iterable["DiscountInfo"],
+        previous_value: Decimal,
+    ):
+        return NotImplemented
+
+    def get_order_shipping_tax_rate(self, order: "Order", previous_value: Decimal):
         return NotImplemented
 
     def get_tax_rate_type_choices(
@@ -445,25 +476,6 @@ class BasePlugin:
     ) -> List["CustomerSource"]:
         return NotImplemented
 
-    def get_checkout_line_tax_rate(
-        self,
-        checkout: "Checkout",
-        checkout_line_info: "CheckoutLineInfo",
-        address: Optional["Address"],
-        discounts: Iterable["DiscountInfo"],
-        previous_value: Decimal,
-    ) -> Decimal:
-        return NotImplemented
-
-    def get_order_line_tax_rate(
-        self,
-        order: "Order",
-        product: "Product",
-        address: Optional["Address"],
-        previous_value: Decimal,
-    ) -> Decimal:
-        return NotImplemented
-
     def get_client_token(self, token_config, previous_value):
         return NotImplemented
 
@@ -493,7 +505,9 @@ class BasePlugin:
         )
 
     def get_payment_gateway_for_checkout(
-        self, checkout: "Checkout", previous_value,
+        self,
+        checkout: "Checkout",
+        previous_value,
     ) -> Optional["PaymentGateway"]:
         return self.get_payment_gateway(checkout.currency, previous_value)
 

@@ -1,5 +1,6 @@
 import uuid
 from datetime import date, timedelta
+from decimal import Decimal
 from unittest.mock import ANY, MagicMock, Mock, call, patch
 
 import graphene
@@ -11,7 +12,8 @@ from prices import Money, TaxedMoney
 
 from ....account.models import CustomerEvent
 from ....core.taxes import TaxError, zero_taxed_money
-from ....order import OrderStatus, events as order_events
+from ....order import OrderStatus
+from ....order import events as order_events
 from ....order.error_codes import OrderErrorCode
 from ....order.models import Order, OrderEvent
 from ....payment import ChargeStatus, CustomPaymentChoices, PaymentError
@@ -188,7 +190,9 @@ def test_orderline_query(staff_api_client, permission_manage_orders, fulfilled_o
 
 
 def test_order_line_with_allocations(
-    staff_api_client, permission_manage_orders, order_with_lines,
+    staff_api_client,
+    permission_manage_orders,
+    order_with_lines,
 ):
     # given
     order = order_with_lines
@@ -254,6 +258,7 @@ query OrdersQuery {
                         amount
                     }
                 }
+                shippingTaxRate
                 lines {
                     id
                 }
@@ -297,10 +302,23 @@ query OrdersQuery {
 def test_order_query(
     staff_api_client, permission_manage_orders, fulfilled_order, shipping_zone
 ):
+    # given
     order = fulfilled_order
+    net = Money(amount=Decimal("10"), currency="USD")
+    gross = Money(amount=net.amount * Decimal(1.23), currency="USD").quantize()
+    shipping_price = TaxedMoney(net=net, gross=gross)
+    order.shipping_price = shipping_price
+    shipping_tax_rate = Decimal("0.23")
+    order.shipping_tax_rate = shipping_tax_rate
+    order.save()
+
     staff_api_client.user.user_permissions.add(permission_manage_orders)
+
+    # when
     response = staff_api_client.post_graphql(ORDERS_QUERY)
     content = get_graphql_content(response)
+
+    # then
     order_data = content["data"]["orders"]["edges"][0]["node"]
     assert order_data["number"] == str(order.pk)
     assert order_data["channel"]["slug"] == order.channel.slug
@@ -316,7 +334,8 @@ def test_order_query(
     expected_price = Money(
         amount=str(order_data["shippingPrice"]["gross"]["amount"]), currency="USD"
     )
-    assert expected_price == order.shipping_price.gross
+    assert expected_price == shipping_price.gross
+    assert order_data["shippingTaxRate"] == float(shipping_tax_rate)
     assert len(order_data["lines"]) == order.lines.count()
     fulfillment = order.fulfillments.first().fulfillment_order
     fulfillment_order = order_data["fulfillments"][0]["fulfillmentOrder"]
@@ -2091,7 +2110,10 @@ DRAFT_ORDER_COMPLETE_MUTATION = """
 
 
 def test_draft_order_complete(
-    staff_api_client, permission_manage_orders, staff_user, draft_order,
+    staff_api_client,
+    permission_manage_orders,
+    staff_user,
+    draft_order,
 ):
     order = draft_order
 
@@ -2131,7 +2153,10 @@ def test_draft_order_complete(
 
 
 def test_draft_order_complete_with_inactive_channel(
-    staff_api_client, permission_manage_orders, staff_user, draft_order,
+    staff_api_client,
+    permission_manage_orders,
+    staff_user,
+    draft_order,
 ):
     order = draft_order
     channel = order.channel
@@ -2277,7 +2302,11 @@ def test_draft_order_complete_anonymous_user_no_email(
 
 
 def test_draft_order_complete_drops_shipping_address(
-    staff_api_client, permission_manage_orders, staff_user, draft_order, address,
+    staff_api_client,
+    permission_manage_orders,
+    staff_user,
+    draft_order,
+    address,
 ):
     order = draft_order
     order.shipping_address = address.get_copy()
@@ -2907,7 +2936,13 @@ def test_order_add_note_as_staff_user(
     assert not CustomerEvent.objects.exists()
 
 
-@pytest.mark.parametrize("message", ("", "   ",))
+@pytest.mark.parametrize(
+    "message",
+    (
+        "",
+        "   ",
+    ),
+)
 def test_order_add_note_fail_on_empty_message(
     staff_api_client, permission_manage_orders, order_with_lines, message
 ):
@@ -3421,6 +3456,42 @@ def test_order_update_shipping(
     assert order.shipping_method == shipping_method
     assert order.shipping_price_net == shipping_price.net
     assert order.shipping_price_gross == shipping_price.gross
+    assert order.shipping_tax_rate == Decimal("0.0")
+    assert order.shipping_method_name == shipping_method.name
+
+
+def test_order_update_shipping_tax_included(
+    staff_api_client,
+    permission_manage_orders,
+    order_with_lines,
+    shipping_method,
+    staff_user,
+    vatlayer,
+):
+    order = order_with_lines
+    address = order_with_lines.shipping_address
+    address.country = "DE"
+    address.save()
+
+    query = ORDER_UPDATE_SHIPPING_QUERY
+    order_id = graphene.Node.to_global_id("Order", order.id)
+    method_id = graphene.Node.to_global_id("ShippingMethod", shipping_method.id)
+    variables = {"order": order_id, "shippingMethod": method_id}
+    response = staff_api_client.post_graphql(
+        query, variables, permissions=[permission_manage_orders]
+    )
+    content = get_graphql_content(response)
+    data = content["data"]["orderUpdateShipping"]
+    assert data["order"]["id"] == order_id
+
+    order.refresh_from_db()
+    shipping_total = shipping_method.channel_listings.get(
+        channel_id=order.channel_id
+    ).get_total()
+    assert order.status == OrderStatus.UNFULFILLED
+    assert order.shipping_method == shipping_method
+    assert order.shipping_price_gross == shipping_total
+    assert order.shipping_tax_rate == Decimal("0.19")
     assert order.shipping_method_name == shipping_method.name
 
 
@@ -4117,7 +4188,10 @@ def test_order_query_with_filter_channels_with_one_channel(
 
 
 def test_order_query_with_filter_channels_without_channel(
-    orders_query_with_filter, staff_api_client, permission_manage_orders, orders,
+    orders_query_with_filter,
+    staff_api_client,
+    permission_manage_orders,
+    orders,
 ):
     # given
     variables = {"filter": {"channels": []}}

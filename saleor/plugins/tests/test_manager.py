@@ -187,7 +187,10 @@ def test_manager_get_order_line_tax_rate_sample_plugin(order_with_lines):
     plugins = ["saleor.plugins.tests.sample_plugins.PluginSample"]
     unit_price = TaxedMoney(Money(12, "USD"), Money(15, "USD"))
     tax_rate = PluginsManager(plugins=plugins).get_order_line_tax_rate(
-        order, product, None, unit_price,
+        order,
+        product,
+        None,
+        unit_price,
     )
     assert tax_rate == Decimal("0.08")
 
@@ -206,7 +209,94 @@ def test_manager_get_order_line_tax_rate_no_plugins(
     line = order.lines.first()
     product = Product.objects.get(name=line.product_name)
     tax_rate = PluginsManager(plugins=[]).get_order_line_tax_rate(
-        order, product, None, unit_price,
+        order,
+        product,
+        None,
+        unit_price,
+    )
+    assert tax_rate == expected_tax_rate
+
+
+def test_manager_get_checkout_shipping_tax_rate_sample_plugin(
+    checkout_with_item, discount_info
+):
+    line = checkout_with_item.lines.all()[0]
+    plugins = ["saleor.plugins.tests.sample_plugins.PluginSample"]
+    shipping_price = TaxedMoney(Money(12, "USD"), Money(14, "USD"))
+
+    variant = line.variant
+    checkout_line_info = CheckoutLineInfo(
+        line=line,
+        variant=variant,
+        channel_listing=variant.channel_listings.first(),
+        product=variant.product,
+        collections=[],
+    )
+
+    tax_rate = PluginsManager(plugins=plugins).get_checkout_shipping_tax_rate(
+        checkout_with_item,
+        [checkout_line_info],
+        checkout_with_item.shipping_address,
+        [discount_info],
+        shipping_price,
+    )
+    assert tax_rate == Decimal("0.08")
+
+
+@pytest.mark.parametrize(
+    "shipping_price, expected_tax_rate",
+    [
+        (TaxedMoney(Money(12, "USD"), Money(14, "USD")), Decimal("0.1667")),
+        (Decimal("0.0"), Decimal("0.0")),
+    ],
+)
+def test_manager_get_checkout_shipping_tax_rate_no_plugins(
+    checkout_with_item, discount_info, shipping_price, expected_tax_rate
+):
+    line = checkout_with_item.lines.all()[0]
+    variant = line.variant
+    checkout_line_info = CheckoutLineInfo(
+        line=line,
+        variant=variant,
+        channel_listing=variant.channel_listings.first(),
+        product=variant.product,
+        collections=[],
+    )
+    tax_rate = PluginsManager(plugins=[]).get_checkout_shipping_tax_rate(
+        checkout_with_item,
+        [checkout_line_info],
+        checkout_with_item.shipping_address,
+        [discount_info],
+        shipping_price,
+    )
+    assert tax_rate == expected_tax_rate
+
+
+def test_manager_get_order_shipping_tax_rate_sample_plugin(order_with_lines):
+    order = order_with_lines
+    plugins = ["saleor.plugins.tests.sample_plugins.PluginSample"]
+    shipping_price = TaxedMoney(Money(12, "USD"), Money(14, "USD"))
+    tax_rate = PluginsManager(plugins=plugins).get_order_shipping_tax_rate(
+        order,
+        shipping_price,
+    )
+    assert tax_rate == Decimal("0.08")
+
+
+@pytest.mark.parametrize(
+    "shipping_price, expected_tax_rate",
+    [
+        (TaxedMoney(Money(12, "USD"), Money(14, "USD")), Decimal("0.1667")),
+        (Decimal("0.0"), Decimal("0.0")),
+    ],
+)
+def test_manager_get_order_shipping_tax_rate_no_plugins(
+    order_with_lines, shipping_price, expected_tax_rate
+):
+    order = order_with_lines
+    tax_rate = PluginsManager(plugins=[]).get_order_shipping_tax_rate(
+        order,
+        shipping_price,
     )
     assert tax_rate == expected_tax_rate
 
@@ -365,7 +455,10 @@ def test_manager_save_plugin_configuration(plugin_configuration):
 
 
 def test_plugin_updates_configuration_shape(
-    new_config, new_config_structure, plugin_configuration, monkeypatch,
+    new_config,
+    new_config_structure,
+    plugin_configuration,
+    monkeypatch,
 ):
 
     config_structure = PluginSample.CONFIG_STRUCTURE.copy()
@@ -388,11 +481,15 @@ def test_plugin_updates_configuration_shape(
 
 
 def test_plugin_add_new_configuration(
-    new_config, new_config_structure, monkeypatch,
+    new_config,
+    new_config_structure,
+    monkeypatch,
 ):
     monkeypatch.setattr(PluginInactive, "DEFAULT_ACTIVE", True)
     monkeypatch.setattr(
-        PluginInactive, "DEFAULT_CONFIGURATION", [new_config],
+        PluginInactive,
+        "DEFAULT_CONFIGURATION",
+        [new_config],
     )
     config_structure = {"Foo": new_config_structure}
     monkeypatch.setattr(PluginInactive, "CONFIG_STRUCTURE", config_structure)

@@ -1,7 +1,11 @@
 import graphene
 import pytest
 
-from ....attribute.utils import _associate_attribute_to_instance
+from ....attribute.models import AttributeValue
+from ....attribute.utils import (
+    _associate_attribute_to_instance,
+    associate_attribute_values_to_instance,
+)
 from ...tests.utils import assert_graphql_error_with_message, get_graphql_content
 from ..enums import VariantAttributeScope
 
@@ -13,6 +17,10 @@ query variant(
         sku
         attributes(variantSelection: $variantSelection) {
             attribute {
+                slug
+            }
+            values {
+                id
                 slug
             }
         }
@@ -109,7 +117,9 @@ def test_get_unpublished_variant_by_id_as_customer(
 
     # when
     response = user_api_client.post_graphql(
-        VARIANT_QUERY, variables, check_no_permissions=False,
+        VARIANT_QUERY,
+        variables,
+        check_no_permissions=False,
     )
 
     # then
@@ -127,7 +137,9 @@ def test_get_unpublished_variant_by_id_as_anonymous_user(
 
     # when
     response = api_client.post_graphql(
-        VARIANT_QUERY, variables, check_no_permissions=False,
+        VARIANT_QUERY,
+        variables,
+        check_no_permissions=False,
     )
 
     # then
@@ -182,7 +194,9 @@ def test_get_variant_by_id_as_customer(user_api_client, variant, channel_USD):
 
     # when
     response = user_api_client.post_graphql(
-        VARIANT_QUERY, variables, check_no_permissions=False,
+        VARIANT_QUERY,
+        variables,
+        check_no_permissions=False,
     )
 
     # then
@@ -198,7 +212,9 @@ def test_get_variant_by_id_as_anonymous_user(api_client, variant, channel_USD):
 
     # when
     response = api_client.post_graphql(
-        VARIANT_QUERY, variables, check_no_permissions=False,
+        VARIANT_QUERY,
+        variables,
+        check_no_permissions=False,
     )
 
     # then
@@ -258,7 +274,9 @@ def test_get_unpublished_variant_by_sku_as_customer(
 
     # when
     response = user_api_client.post_graphql(
-        VARIANT_QUERY, variables, check_no_permissions=False,
+        VARIANT_QUERY,
+        variables,
+        check_no_permissions=False,
     )
 
     # then
@@ -275,7 +293,9 @@ def test_get_unpublished_variant_by_sku_as_anonymous_user(
 
     # when
     response = api_client.post_graphql(
-        VARIANT_QUERY, variables, check_no_permissions=False,
+        VARIANT_QUERY,
+        variables,
+        check_no_permissions=False,
     )
 
     # then
@@ -327,7 +347,9 @@ def test_get_variant_by_sku_as_customer(user_api_client, variant, channel_USD):
 
     # when
     response = user_api_client.post_graphql(
-        VARIANT_QUERY, variables, check_no_permissions=False,
+        VARIANT_QUERY,
+        variables,
+        check_no_permissions=False,
     )
 
     # then
@@ -342,7 +364,9 @@ def test_get_variant_by_sku_as_anonymous_user(api_client, variant, channel_USD):
 
     # when
     response = api_client.post_graphql(
-        VARIANT_QUERY, variables, check_no_permissions=False,
+        VARIANT_QUERY,
+        variables,
+        check_no_permissions=False,
     )
 
     # then
@@ -404,3 +428,53 @@ def test_get_variant_by_id_with_variant_selection_filter(
         assert data["attributes"][0]["attribute"]["slug"] == size_attribute.slug
     else:
         len(data["attributes"]) == 2
+
+
+def test_get_variant_with_sorted_attribute_values(
+    staff_api_client,
+    variant,
+    product_type_product_reference_attribute,
+    permission_manage_products,
+    product_list,
+):
+    # given
+    product_type = variant.product.product_type
+    product_type.variant_attributes.set([product_type_product_reference_attribute])
+
+    attr_value_1 = AttributeValue.objects.create(
+        attribute=product_type_product_reference_attribute,
+        name=product_list[0].name,
+        slug=f"{variant.pk}_{product_list[0].pk}",
+    )
+    attr_value_2 = AttributeValue.objects.create(
+        attribute=product_type_product_reference_attribute,
+        name=product_list[1].name,
+        slug=f"{variant.pk}_{product_list[1].pk}",
+    )
+    attr_value_3 = AttributeValue.objects.create(
+        attribute=product_type_product_reference_attribute,
+        name=product_list[2].name,
+        slug=f"{variant.pk}_{product_list[2].pk}",
+    )
+
+    attr_values = [attr_value_2, attr_value_1, attr_value_3]
+    associate_attribute_values_to_instance(
+        variant, product_type_product_reference_attribute, *attr_values
+    )
+
+    variant_id = graphene.Node.to_global_id("ProductVariant", variant.id)
+    variables = {"id": variant_id}
+    staff_api_client.user.user_permissions.add(permission_manage_products)
+
+    # when
+    response = staff_api_client.post_graphql(VARIANT_QUERY, variables)
+
+    # then
+    content = get_graphql_content(response)
+    data = content["data"]["productVariant"]
+    assert len(data["attributes"]) == 1
+    values = data["attributes"][0]["values"]
+    assert len(values) == 3
+    assert [value["id"] for value in values] == [
+        graphene.Node.to_global_id("AttributeValue", val.pk) for val in attr_values
+    ]

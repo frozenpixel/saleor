@@ -1,3 +1,4 @@
+from decimal import Decimal
 from functools import wraps
 from typing import Iterable, List
 
@@ -142,11 +143,16 @@ def update_order_prices(order, discounts):
                 line.save()
 
     if order.shipping_method:
-        order.shipping_price = manager.calculate_order_shipping(order)
+        shipping_price = manager.calculate_order_shipping(order)
+        order.shipping_price = shipping_price
+        order.shipping_tax_rate = manager.get_order_shipping_tax_rate(
+            order, shipping_price
+        )
         order.save(
             update_fields=[
                 "shipping_price_net_amount",
                 "shipping_price_gross_amount",
+                "shipping_tax_rate",
                 "currency",
             ]
         )
@@ -251,7 +257,19 @@ def change_order_line_quantity(user, line, old_quantity, new_quantity):
     """Change the quantity of ordered items in a order line."""
     if new_quantity:
         line.quantity = new_quantity
-        line.save(update_fields=["quantity"])
+        total_price_net_amount = line.quantity * line.unit_price_net_amount
+        total_price_gross_amount = line.quantity * line.unit_price_gross_amount
+        line.total_price_net_amount = total_price_net_amount.quantize(Decimal("0.001"))
+        line.total_price_gross_amount = total_price_gross_amount.quantize(
+            Decimal("0.001")
+        )
+        line.save(
+            update_fields=[
+                "quantity",
+                "total_price_net_amount",
+                "total_price_gross_amount",
+            ]
+        )
     else:
         delete_order_line(line)
 
@@ -355,7 +373,8 @@ def get_discounted_lines(lines, voucher):
 
 
 def get_prices_of_discounted_specific_product(
-    lines: Iterable[OrderLine], voucher: Voucher,
+    lines: Iterable[OrderLine],
+    voucher: Voucher,
 ) -> List[Money]:
     """Get prices of variants belonging to the discounted specific products.
 
